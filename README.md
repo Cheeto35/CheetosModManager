@@ -12,12 +12,29 @@ A Tavern launcher addon for finding, installing and updating A Township Tale mod
 
 > Listed mods are submitted by the community and aren't reviewed. Mods run code on your PC, so only install mods you trust.
 
+## Modpacks (players)
+
+The **Modpacks** tab keeps your mods in packs. Each pack is Off, On everywhere, or On only for the servers you pick. When the game starts, Mod Manager puts exactly the right mods in `Mods` for the server you're joining, so servers that need different mods just work.
+
+- **Join a server's pack…**: type a server's address, like `play.example.com:1757`. Mod Manager asks the server which mods it uses, downloads them into a pack, and loads that pack only on that server. When the server owner changes the pack, you get the changes the next time you join.
+- The first time you join a server that shares a pack, Mod Manager asks "This server has a modpack. Set it up and play?"
+- **Add to pack**, in any mod's ⋯ menu, puts a mod from the list straight into one of your packs.
+- Packs from a link (a server's `manifest.json`), zip import and export, and per-mod ticks all work as they did in Modpacks.
+
+## Server pack (server owners)
+
+In the server launcher, the **Server pack** tab lists the mods you've installed that players need too. Tick the ones players should get, add any other mod from the list or any direct `.dll` download link, and press **Save**. Copy the share line and post it with your server. Players can also just join: Mod Manager offers your pack automatically.
+
+The pack is shared through the launcher's login port (1762), the same one players already connect to, so you don't need a website. Players get exactly the files and links you list.
+
 ## Install
 
 1. Download `CheetosModManager-<version>.zip` from the latest release.
 2. Extract the `mod_manager` folder into your launcher's `addons` folder.
 3. Enable **Cheetos Mod Manager** in the launcher's addon list and restart the launcher.
 4. Open it with the **🧩 Mod Manager** button.
+
+If you used the separate Modpacks addon, turn it off: Mod Manager includes it now and uses the same `Modpacks` folder, so your packs carry over.
 
 MelonLoader must be installed first. Use the launcher's own Mods window for that.
 
@@ -31,5 +48,9 @@ The list lives at [Cheeto35/ATTModIndex](https://github.com/Cheeto35/ATTModIndex
 
 - `<game folder>/.mod_manager.json`: which mods are installed and which files belong to each.
 - In the launcher's data folder: `mod_manager_index_cache.json`, a saved copy of the list for when you're offline, and `mod_manager_settings.json`.
+
+## Credits
+
+Modpacks is by **Shadow** ([calebv2/-Client-Addon-Modpacks](https://github.com/calebv2/-Client-Addon-Modpacks)) and is included under the MIT licence (see `modpacks/LICENSE`). Mod Manager adds server packs, Add to pack, and the combined window.
 
 Made By Cheeto.
