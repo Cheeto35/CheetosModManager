@@ -123,10 +123,13 @@ def _gather(tmp, assets, download, on_progress):
     """Downloads assets; returns {relative target: (kind, source)}."""
     targets = {}
     for a in assets:
-        local = os.path.join(tmp, os.path.basename(a["name"]))
+        parts = _safe_parts(a["name"])
+        if parts is None or len(parts) != 1:
+            raise InstallError(f"The release file name {a['name']!r} isn't safe to install.")
+        local = os.path.join(tmp, parts[0])
         download(a["url"], local, on_progress)
         if _ext(a["name"]) == ".dll":
-            targets["Mods/" + os.path.basename(a["name"])] = ("file", local)
+            targets["Mods/" + parts[0]] = ("file", local)
         else:
             try:
                 with zipfile.ZipFile(local) as z:
