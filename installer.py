@@ -1,4 +1,5 @@
 """Installs, updates and removes mods in the game folder, and remembers which files each mod owns."""
+import hashlib
 import json
 import os
 import shutil
@@ -119,8 +120,16 @@ def default_download(url, dest, on_progress=None):
                 on_progress(done, total)
 
 
-def _gather(tmp, assets, download, on_progress):
-    """Downloads assets; returns {relative target: (kind, source)}."""
+def file_sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest().upper()
+
+
+def _gather(tmp, assets, download, on_progress, infos=None):
+    """Downloads assets; returns {relative target: (kind, source)}. Appends {name, url, sha256} to infos."""
     targets = {}
     for a in assets:
         parts = _safe_parts(a["name"])
@@ -128,6 +137,8 @@ def _gather(tmp, assets, download, on_progress):
             raise InstallError(f"The release file name {a['name']!r} isn't safe to install.")
         local = os.path.join(tmp, parts[0])
         download(a["url"], local, on_progress)
+        if infos is not None:
+            infos.append({"name": parts[0], "url": a["url"], "sha256": file_sha256(local)})
         if _ext(a["name"]) == ".dll":
             targets["Mods/" + parts[0]] = ("file", local)
         else:
@@ -140,8 +151,8 @@ def _gather(tmp, assets, download, on_progress):
     return targets
 
 
-def _write_new(game_dir, rel, kind, src):
-    dest = os.path.join(game_dir, *rel.split("/")) + ".mmnew"
+def _write_new(base_dir, rel, kind, src):
+    dest = os.path.join(base_dir, *rel.split("/")) + ".mmnew"
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     if kind == "file":
         shutil.copyfile(src, dest)
@@ -162,8 +173,9 @@ def install(game_dir, mod, download=None, on_progress=None, confirm=None):
         raise InstallError("This mod's release has no .dll or .zip file.")
     tmp = tempfile.mkdtemp(prefix="modmgr_")
     staged = []
+    infos = []
     try:
-        targets = _gather(tmp, assets, download, on_progress)
+        targets = _gather(tmp, assets, download, on_progress, infos)
         if not targets:
             raise InstallError("This mod's release has no .dll files in it.")
         clash = conflicts(game_dir, mod.id, sorted(targets))
@@ -191,13 +203,73 @@ def install(game_dir, mod, download=None, on_progress=None, confirm=None):
                 pass
             except OSError:
                 stuck.append(old)  # still ours; uninstall will try again
-        records[mod.id] = {"tag": mod.latest_tag, "files": new + stuck}
+        records[mod.id] = {"tag": mod.latest_tag, "files": new + stuck, "assets": infos}
         save_records(game_dir, records)
         return new
     finally:
         for path in staged:
             try:
                 os.remove(path)
+            except OSError:
+                pass
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _swap_in(staged):
+    try:
+        for path in list(staged):
+            os.replace(path, path[:-len(".mmnew")])
+            staged.remove(path)
+    except PermissionError:
+        raise ModLockedError()
+
+
+def install_to_pack(game_dir, mod, pack_dir, download=None, on_progress=None, confirm=None):
+    """Installs `mod` into a Modpacks pack folder. Returns the pack file names written.
+
+    Mods/ files go into the pack; Plugins/ and UserLibs/ files still go into the game folder."""
+    download = download or default_download
+    assets = pick_assets(mod.assets)
+    if not assets:
+        raise InstallError("This mod's release has no .dll or .zip file.")
+    tmp = tempfile.mkdtemp(prefix="modmgr_")
+    staged = []
+    infos = []
+    try:
+        targets = _gather(tmp, assets, download, on_progress, infos)
+        pack_files = {rel.split("/")[-1]: t for rel, t in targets.items() if rel.split("/")[0] == "Mods"}
+        game_files = {rel: t for rel, t in targets.items() if rel.split("/")[0] != "Mods"}
+        if not pack_files:
+            raise InstallError("This mod's release has no .dll files in it.")
+        clash = conflicts(game_dir, mod.id, sorted(game_files))
+        if clash and not (confirm and confirm(clash)):
+            raise InstallCancelled("Install cancelled.")
+        for name in sorted(pack_files):
+            staged.append(_write_new(pack_dir, name, *pack_files[name]))
+        for rel in sorted(game_files):
+            staged.append(_write_new(game_dir, rel, *game_files[rel]))
+        _swap_in(staged)
+        path = os.path.join(pack_dir, "pack.json")
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        mm = data.get("mod_manager") if isinstance(data.get("mod_manager"), dict) else {}
+        mm[mod.id] = {"tag": mod.latest_tag, "files": sorted(pack_files), "assets": infos,
+                      "game_files": sorted(game_files)}
+        data["mod_manager"] = mm
+        tmp_path = path + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp_path, path)
+        return sorted(pack_files)
+    finally:
+        for p in staged:
+            try:
+                os.remove(p)
             except OSError:
                 pass
         shutil.rmtree(tmp, ignore_errors=True)

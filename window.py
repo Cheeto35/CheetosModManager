@@ -286,6 +286,14 @@ class ModManagerWindow(tk.Toplevel):
         menu = tk.Menu(self, tearoff=False, bg=SURF, fg=PARCH, activebackground=BORDER, activeforeground=AMBER)
         menu.add_command(label="Open GitHub page", command=lambda: webbrowser.open("https://github.com/" + m.repo))
         menu.add_command(label="Report this mod", command=lambda: webbrowser.open(report_url(m.id)))
+        if self.side == "client" and m.latest_tag:
+            sub = tk.Menu(menu, tearoff=False, bg=SURF, fg=PARCH, activebackground=BORDER, activeforeground=AMBER)
+            for name in self.pack_names():
+                sub.add_command(label=name, command=lambda n=name: self.add_to_pack(m, n))
+            if self.pack_names():
+                sub.add_separator()
+            sub.add_command(label="New pack…", command=lambda: self._new_pack_for(m))
+            menu.add_cascade(label="Add to pack", menu=sub, state="disabled" if self.busy else "normal")
         if m.id in self.records:
             menu.add_separator()
             menu.add_command(label="Uninstall", command=lambda: self.uninstall(m),
@@ -302,6 +310,40 @@ class ModManagerWindow(tk.Toplevel):
     # ---------- actions ----------
     def _on_action(self, m):
         self.install(m)
+
+    def pack_names(self):
+        try:
+            from .modpacks import engine
+            return [p.name for p in engine.list_packs(self.game_dir)]
+        except Exception:
+            return []
+
+    def _new_pack_for(self, m):
+        from tkinter import simpledialog
+        name = simpledialog.askstring("New pack", "Name for the new pack:", parent=self)
+        if name and name.strip():
+            self.add_to_pack(m, name.strip(), create=True)
+
+    def add_to_pack(self, m, pack_name, create=False):
+        if self.busy or not m.latest_tag:
+            return
+        from .modpacks import engine
+
+        def work():
+            pack = engine.find_pack(self.game_dir, pack_name)
+            if pack is None:
+                if not create:
+                    raise ins.InstallError(f"there's no pack called {pack_name}")
+                pack = engine.create_pack(self.game_dir, pack_name, "all")
+            return ins.install_to_pack(self.game_dir, m, pack.path, self._download, self._progress(m.name),
+                                       self._confirm_replace)
+
+        def done(r, e):
+            self._after_change(f"Added {m.name} to {pack_name}.", e, m.name)
+            panel = self.panels.get("modpacks")
+            if e is None and panel is not None and hasattr(panel, "refresh"):
+                panel.refresh()
+        self._run(work, done, f"Adding {m.name} to {pack_name}…")
 
     def _warned(self):
         try:

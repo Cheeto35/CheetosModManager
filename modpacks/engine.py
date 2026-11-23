@@ -221,6 +221,8 @@ class Pack:
         self.source = data.get("source") if isinstance(data.get("source"), dict) else {}
         dropped = data.get("dropped") if isinstance(data.get("dropped"), dict) else {}
         self.dropped = {k.lower(): str(v).upper() for k, v in dropped.items() if isinstance(k, str)}
+        # mod_manager: keep Mod Manager's record of which community mods are in this pack.
+        self.mod_manager = data.get("mod_manager") if isinstance(data.get("mod_manager"), dict) else {}
 
     def files(self):
         try:
@@ -276,6 +278,8 @@ class Pack:
             state["source"] = self.source
         if self.dropped:
             state["dropped"] = dict(sorted(self.dropped.items()))
+        if self.mod_manager:  # mod_manager
+            state["mod_manager"] = self.mod_manager
         return state
 
     def link_host(self):
