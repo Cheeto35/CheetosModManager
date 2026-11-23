@@ -157,7 +157,8 @@ class ModManagerWindow(tk.Toplevel):
         return self._make_server_panel()
 
     def _make_server_panel(self):
-        return tk.Label(self._panel_area, text="Server pack", bg=BG, fg=MUTED)
+        from .serverpack_ui import ServerPackPanel
+        return ServerPackPanel(self._panel_area, self)
 
     def _mark_tabs(self):
         for key, b in self.tabs.items():
@@ -221,6 +222,9 @@ class ModManagerWindow(tk.Toplevel):
             self.mods = mods
             self.records = ins.load_records(self.game_dir)
             self.render()
+            panel = self.panels.get("server_pack")
+            if panel is not None:
+                panel.refresh()
             self.status_var.set(note or f"{len(mods)} mod{'s' if len(mods) != 1 else ''} in the community list.")
         self._run(self._load, done, "Loading the mod list…")
 
