@@ -39,13 +39,17 @@ SIDE_LABEL = {"client": "client", "server": "server", "both": "client + server"}
 
 
 class ModManagerWindow(tk.Toplevel):
-    def __init__(self, parent, exe_path, *, load=load_index, download=None, settings_path=None):
+    def __init__(self, parent, exe_path, *, side="client", load=load_index, download=None, settings_path=None,
+                 **panel_options):
         super().__init__(parent)
         _start_hidden(self)
         self.title("Mod Manager")
         self.configure(bg=BG)
-        self.geometry("760x560")
-        self.minsize(560, 360)
+        self.geometry("920x640")
+        self.minsize(640, 420)
+        self.side = side
+        self.panel_options = panel_options
+        self.panels = {}
         _set_window_icon(self)
         self.launcher = parent
         self.game_dir = os.path.dirname(exe_path)
@@ -65,8 +69,31 @@ class ModManagerWindow(tk.Toplevel):
 
     # ---------- layout ----------
     def _build(self):
-        top = tk.Frame(self, bg=BG)
-        top.pack(fill="x", padx=10, pady=(10, 4))
+        bar = tk.Frame(self, bg=BG)
+        bar.pack(fill="x", padx=10, pady=(10, 0))
+        extra = ("modpacks", "Modpacks") if self.side == "client" else ("server_pack", "Server pack")
+        self.tabs = {}
+        for key, label in (("browse", "Browse"), ("installed", "Installed (0)"), extra):
+            b = _btn(bar, label, lambda k=key: self.show_tab(k), font=("Segoe UI", 10, "bold"), padx=14, pady=6)
+            b.pack(side="left", padx=(0, 2))
+            self.tabs[key] = b
+        self.browse_btn, self.installed_btn = self.tabs["browse"], self.tabs["installed"]
+        _btn(bar, "+ Submit a mod", self.open_submit, "primary", font=("Segoe UI", 9, "bold"),
+             padx=10, pady=4).pack(side="right")
+        self.update_all_btn = _btn(bar, "Update all (0)", self.update_all, "success", font=("Segoe UI", 9),
+                                   padx=10, pady=4)
+        self.update_all_btn.pack(side="right", padx=4)
+        _btn(bar, "⟳", self.refresh, font=("Segoe UI", 9), padx=8, pady=4).pack(side="right")
+        tk.Frame(self, bg=BORDER, height=1).pack(fill="x", padx=10)
+
+        self.status_var = tk.StringVar(value="Loading the mod list…")
+        tk.Label(self, textvariable=self.status_var, bg=BG, fg=MUTED, font=("Segoe UI", 8), anchor="w"
+                 ).pack(side="bottom", fill="x", padx=10, pady=(4, 8))
+
+        self._list_area = tk.Frame(self, bg=BG)
+        self._panel_area = tk.Frame(self, bg=BG)
+        top = tk.Frame(self._list_area, bg=BG)
+        top.pack(fill="x", pady=(8, 6))
         self.search_var = tk.StringVar()
         e = tk.Entry(top, textvariable=self.search_var, bg=SURF, fg=PARCH, insertbackground=AMBER,
                      relief="flat", font=("Segoe UI", 10), bd=6)
@@ -79,22 +106,8 @@ class ModManagerWindow(tk.Toplevel):
                            activeforeground=AMBER, relief="flat", bd=0, padx=10, pady=4,
                            font=("Segoe UI", 9)).pack(side="left", padx=(6 if value == "all" else 2, 0))
 
-        row = tk.Frame(self, bg=BG)
-        row.pack(fill="x", padx=10, pady=(2, 6))
-        self.browse_btn = _btn(row, "Browse", lambda: self._set_view("browse"), font=("Segoe UI", 9), padx=10, pady=4)
-        self.browse_btn.pack(side="left")
-        self.installed_btn = _btn(row, "Installed (0)", lambda: self._set_view("installed"),
-                                  font=("Segoe UI", 9), padx=10, pady=4)
-        self.installed_btn.pack(side="left", padx=4)
-        _btn(row, "⟳", self.refresh, font=("Segoe UI", 9), padx=8, pady=4).pack(side="left")
-        _btn(row, "+ Submit a mod", self.open_submit, "primary", font=("Segoe UI", 9, "bold"),
-             padx=10, pady=4).pack(side="right")
-        self.update_all_btn = _btn(row, "Update all (0)", self.update_all, "success", font=("Segoe UI", 9),
-                                   padx=10, pady=4)
-        self.update_all_btn.pack(side="right", padx=4)
-
-        body = tk.Frame(self, bg=BG)
-        body.pack(fill="both", expand=True, padx=10)
+        body = tk.Frame(self._list_area, bg=BG)
+        body.pack(fill="both", expand=True)
         self._canvas = tk.Canvas(body, bg=BG, highlightthickness=0)
         sb = _mk_scrollbar(body, self._canvas.yview)
         sb.pack(side="right", fill="y")
@@ -104,13 +117,54 @@ class ModManagerWindow(tk.Toplevel):
         self._list_item = self._canvas.create_window((0, 0), window=self._list, anchor="nw")
         self._list.bind("<Configure>", lambda e: self._canvas.configure(scrollregion=self._canvas.bbox("all")))
         self._canvas.bind("<Configure>", lambda e: self._canvas.itemconfig(self._list_item, width=e.width))
-        self._canvas.bind_all("<MouseWheel>", self._on_wheel, add="+")
+        self.bind("<MouseWheel>", self._on_wheel, add="+")
+        self._list_area.pack(fill="both", expand=True, padx=10)
 
-        self.status_var = tk.StringVar(value="Loading the mod list…")
-        tk.Label(self, textvariable=self.status_var, bg=BG, fg=MUTED, font=("Segoe UI", 8), anchor="w"
-                 ).pack(fill="x", padx=10, pady=(4, 8))
+    def show_tab(self, name):
+        if name not in self.tabs:
+            return
+        self.view = name
+        if name in ("browse", "installed"):
+            self._panel_area.pack_forget()
+            for panel in self.panels.values():
+                panel.pack_forget()
+            self._list_area.pack(fill="both", expand=True, padx=10)
+            self.render()
+        else:
+            self._list_area.pack_forget()
+            self._panel_area.pack(fill="both", expand=True, padx=10, pady=(6, 0))
+            for key, panel in self.panels.items():
+                if key != name:
+                    panel.pack_forget()
+            panel = self.panels.get(name) or self._make_panel(name)
+            self.panels[name] = panel
+            panel.pack(fill="both", expand=True)
+            if hasattr(panel, "refresh"):
+                panel.refresh()
+        self._mark_tabs()
+
+    def _make_panel(self, name):
+        if name == "modpacks":
+            from . import packhooks
+            if packhooks.GUARD_MESSAGE:
+                return tk.Label(self._panel_area, text=packhooks.GUARD_MESSAGE, bg=BG, fg=AMBER,
+                                font=("Segoe UI", 10), wraplength=560, justify="left")
+            from .modpacks.window import ModpacksPanel
+            panel = ModpacksPanel(self._panel_area, self.launcher, self.game_dir)
+            self.launcher._modpacks_window = panel  # Modpacks refreshes this after launches and updates
+            return panel
+        return self._make_server_panel()
+
+    def _make_server_panel(self):
+        return tk.Label(self._panel_area, text="Server pack", bg=BG, fg=MUTED)
+
+    def _mark_tabs(self):
+        for key, b in self.tabs.items():
+            b.config(fg=AMBER if key == self.view else PARCH)
 
     def _on_wheel(self, event):
+        if self.view not in ("browse", "installed"):
+            return
         try:
             if self.winfo_exists() and str(event.widget).startswith(str(self)):
                 self._canvas.yview_scroll(int(-event.delta / 120), "units")
@@ -166,9 +220,6 @@ class ModManagerWindow(tk.Toplevel):
             self.status_var.set(note or f"{len(mods)} mod{'s' if len(mods) != 1 else ''} in the community list.")
         self._run(self._load, done, "Loading the mod list…")
 
-    def _set_view(self, view):
-        self.view = view
-        self.render()
 
     def _visible(self):
         mods = search(self.mods or [], self.search_var.get(), self.side_var.get())
@@ -190,8 +241,9 @@ class ModManagerWindow(tk.Toplevel):
         self.installed_btn.config(text=f"Installed ({n_inst})")
         self.update_all_btn.config(text=f"Update all ({n_upd})",
                                    state="normal" if n_upd and not self.busy else "disabled")
-        for b, v in ((self.browse_btn, "browse"), (self.installed_btn, "installed")):
-            b.config(fg=AMBER if self.view == v else PARCH)
+        self._mark_tabs()
+        if self.view not in ("browse", "installed"):
+            return
         mods = self._visible()
         if self.mods is not None and not mods:
             msg = ("No mods installed from the list yet." if self.view == "installed"
@@ -418,13 +470,28 @@ def open_for(launcher, side="client", tab=None):
     exe = launcher.v_exe.get().strip() if hasattr(launcher, "v_exe") else ""
     if not exe or not os.path.isfile(exe):
         messagebox.showinfo("Mod Manager", "Set the game's exe path first.", parent=launcher)
+        return None
+    win = getattr(launcher, "_mod_manager_win", None)
+    try:
+        alive = win is not None and win.winfo_exists()
+    except tk.TclError:
+        alive = False
+    if not alive:
+        win = launcher._mod_manager_win = ModManagerWindow(launcher, exe, side=side)
+    else:
+        win.deiconify()
+        win.lift()
+    if tab:
+        win.show_tab(tab)
+    return win
+
+
+def _install_modpacks_open_hook():
+    try:
+        from .modpacks import window as mp_window
+    except Exception:
         return
-    existing = getattr(launcher, "_mod_manager_win", None)
-    if existing is not None:
-        try:
-            if existing.winfo_exists():
-                existing.lift()
-                return
-        except tk.TclError:
-            pass
-    launcher._mod_manager_win = ModManagerWindow(launcher, exe)
+    mp_window.OPEN_HOOK = lambda root, game_dir: open_for(root, "client", "modpacks")
+
+
+_install_modpacks_open_hook()

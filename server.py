@@ -6,7 +6,7 @@ from .window import open_for
 
 
 def _open_mod_manager(self):
-    open_for(self)
+    open_for(self, "server")
 
 
 ServerLauncher._open_mod_manager = _open_mod_manager
