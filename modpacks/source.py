@@ -624,3 +624,27 @@ def update_all(game_dir, report, fetcher=None):
 def unlink(pack):
     pack.source = {}
     pack.save()
+
+
+def join_server(game_dir, host, port, fetcher=None):
+    """mod_manager: set up (or update) the pack a server shares, scoped to that server. Returns (pack, found)."""
+    pc = _packclient()
+    url = pc.link(host, port)
+    manifest = read_manifest(url)
+    server = {"name": manifest.name or host, "host": host, "port": str(engine.parse_port(port))}
+    pack = next((p for p in engine.list_packs(game_dir) if source_state(p)["url"] == url), None)
+    if pack is not None:
+        found = sync(game_dir, pack, manifest, fetcher)
+        pack = engine.find_pack(game_dir, pack.name)
+    else:
+        safe_host = host.replace(":", "-")
+        name = manifest.name if manifest.name and not engine.check_name(manifest.name) else safe_host
+        if engine.find_pack(game_dir, name) is not None:
+            name = "%s (%s)" % (name, safe_host)
+        pack, found, manifest = subscribe(game_dir, url, name, [], fetcher, manifest)
+    if pack.mode != "servers" or all(engine.server_key(s["host"], s["port"]) != engine.server_key(host, port)
+                                     for s in pack.servers):
+        pack.mode = "servers"
+        pack.servers = [s for s in pack.servers] + [server]
+        pack.save()
+    return pack, found

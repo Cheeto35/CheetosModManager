@@ -121,6 +121,29 @@ def _server_pack_choice(game_dir, target):
     return True
 
 
+def _offer_server_pack(game_dir, target):
+    """mod_manager: if the server shares a modpack, offer to set it up. True when it's now set up."""
+    key = _server_key(target)
+    if _server_preferences().get(key) == "default":
+        return False
+    if threading.current_thread() is not threading.main_thread():
+        return False
+    pc = source._packclient()
+    reply = pc.query_pack(target[0], timeout=3)
+    if not isinstance(reply, dict) or reply.get("status") != "ok" or not reply.get("files"):
+        return False
+    names = [str(f.get("filename", "")).rsplit(".", 1)[0] for f in reply["files"] if isinstance(f, dict)]
+    title = str(reply.get("name") or key)
+    shown = ", ".join(names[:6]) + (", ..." if len(names) > 6 else "")
+    text = "%s has a modpack (%d mod%s: %s).\n\nSet it up and play?" % (
+        title, len(names), "" if len(names) == 1 else "s", shown)
+    if not messagebox.askyesno("Server modpack", text, parent=_app()):
+        return False
+    pack, found = source.join_server(game_dir, target[0], target[1])
+    _log("Modpacks: set up %s from the server (%s)" % (pack.name, source.summary(found)), "ok")
+    return True
+
+
 def _has_active_pack(game_dir, target):
     return any(pack.links(target, engine.resolve) for pack in engine.list_packs(game_dir))
 
@@ -214,7 +237,8 @@ def _before_launch(args):
     target = engine.target_from_args(list(args))
     try:
         if target is not None and not _has_active_pack(game_dir, target):
-            _server_pack_choice(game_dir, target)
+            if not _offer_server_pack(game_dir, target):  # mod_manager
+                _server_pack_choice(game_dir, target)
         if target is not None:
             _check_join_updates(game_dir, target)
         result = _apply(game_dir, target)

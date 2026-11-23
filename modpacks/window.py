@@ -475,6 +475,8 @@ class ModpacksPanel(tk.Frame):
         row2.pack(fill="x", pady=(4, 0))
         self._small(row2, "Import zip...", self.import_pack).pack(side="left")
         self._small(row2, "From a link...", self.from_link).pack(side="left", padx=(4, 0))
+        # mod_manager: get the pack a server shares, by its address.
+        self._small(row2, "Join a server's pack...", self.join_server, "primary").pack(side="left", padx=(4, 0))
 
         head = tk.Frame(right, bg=t.BG)
         head.pack(fill="x", pady=(6, 4))
@@ -927,6 +929,37 @@ class ModpacksPanel(tk.Frame):
         if refused:
             text += " Still in the pack: " + ", ".join(refused) + "."
         self.say(text, bool(refused) and not moved)
+
+    def join_server(self):
+        # mod_manager
+        host, port = _ip_box(self.root)
+        initial = "%s:%s" % (host, port) if host else ""
+        text = simpledialog.askstring("Join a server's pack", "Server address (like play.example.com:1757):",
+                                      initialvalue=initial, parent=self)
+        if text and text.strip():
+            self.join_address(text)
+
+    def join_address(self, text):
+        """mod_manager: set up the pack the server at `text` shares. False if the address can't be read."""
+        pc = source._packclient()
+        addr = pc.parse_address(text)
+        if addr is None:
+            self.say("That doesn't look like a server address.", True)
+            return False
+        host, port = addr
+        self.say("Asking %s for its modpack..." % host)
+
+        def done(result, error):
+            if error:
+                self.say(str(error), True)
+                return
+            pack, found = result
+            self.refresh(select=pack.name)
+            n = len(pack.files())
+            self.say("Joined %s: %d mod%s. It loads when you join %s:%d." % (
+                pack.name, n, "" if n == 1 else "s", host, port))
+        background(self, lambda: source.join_server(self.game_dir, host, port), done)
+        return True
 
     def from_link(self):
         url = simpledialog.askstring("Pack from a link", "Paste the pack's JSON mod-list link "
