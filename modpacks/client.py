@@ -13,7 +13,7 @@ from . import engine, source, window
 CHECK_DELAY_MS = 0
 MODS_BUTTON = "\U0001F9EA Mods"
 AFTER_TEXTS = ("\U0001F4C1 Mods Folder", "☑ Toggle Mods")
-BUTTON_TEXT = "\U0001F4E6 Modpacks"
+BUTTON_TEXT = "\U0001F9E9 Mod Manager"  # mod_manager: status shows on the Mod Manager button
 PREFERENCES_FILE = "modpacks_preferences.json"
 
 
@@ -319,31 +319,39 @@ def _open(root):
         window.open_window(root, game_dir)
 
 
+def _find_button(widget):
+    for child in widget.winfo_children():
+        try:
+            if str(child.cget("text")).startswith(BUTTON_TEXT):
+                return child
+        except Exception:
+            pass
+        found = _find_button(child)
+        if found is not None:
+            return found
+    return None
+
+
 def _add_button(anchor):
+    # mod_manager: Modpacks no longer adds its own button. It shows its status on the Mod Manager button
+    # (added by mod_manager.client) and still runs its startup update check once.
     try:
         root = anchor.winfo_toplevel()
         if not hasattr(root, "v_exe"):
             return
-        after = anchor
-        for child in anchor.master.pack_slaves():
-            try:
-                text = child.cget("text")
-            except Exception:
-                continue
-            if text == BUTTON_TEXT:
-                return
-            if text in AFTER_TEXTS:
-                after = child
-        for child in anchor.master.winfo_children():
-            try:
-                if child is getattr(root, "_modpacks_button", None) or child.cget("text") == BUTTON_TEXT:
-                    return
-            except Exception:
-                continue
-        button = _theme._btn(anchor.master, BUTTON_TEXT, lambda: _open(root),
-                             font=("Segoe UI", 9), pady=5, padx=10)
-        button.pack(side="left", padx=(6, 0), after=after)
-        root._modpacks_button = button
+        existing = getattr(root, "_modpacks_button", None)
+        if existing is None:
+            for child in anchor.master.winfo_children():
+                try:
+                    if str(child.cget("text")).startswith(BUTTON_TEXT):
+                        existing = child
+                        break
+                except Exception:
+                    continue
+        if existing is None:
+            existing = _find_button(root)
+        if existing is not None:
+            root._modpacks_button = existing
         if not getattr(root, "_modpacks_checked", False):
             root._modpacks_checked = True
             root.after(CHECK_DELAY_MS, lambda: _startup_check(root))

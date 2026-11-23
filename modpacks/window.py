@@ -256,7 +256,7 @@ class UpdateDialog(tk.Toplevel):
         t = _theme
         self.configure(bg=t.BG)
         if parent is not None and parent.winfo_viewable():
-            self.transient(parent)
+            self.transient(parent.winfo_toplevel())  # mod_manager: parent may be a panel
         width = min(760, self.winfo_screenwidth() - 60)
         height = min(740, self.winfo_screenheight() - 100)
         self._wrapping = []
@@ -392,12 +392,14 @@ def ask_updates(parent, game_dir, report, server=None):
                 pass
 
 
-class ModpacksWindow(tk.Toplevel):
-    def __init__(self, root, game_dir):
-        super().__init__(root)
-        _chrome._start_hidden(self)
-        self.title(TITLE)
-        self.configure(bg=_theme.BG)
+# mod_manager: OPEN_HOOK(root, game_dir) opens Mod Manager on its Modpacks tab; set by mod_manager.window.
+OPEN_HOOK = None
+
+
+# mod_manager: the Modpacks window is a panel inside the Mod Manager window (was ModpacksWindow(tk.Toplevel)).
+class ModpacksPanel(tk.Frame):
+    def __init__(self, parent, root, game_dir):
+        super().__init__(parent, bg=_theme.BG)
         self.root = root
         self.game_dir = game_dir
         self.selected = None
@@ -409,19 +411,14 @@ class ModpacksWindow(tk.Toplevel):
         self._trace = None
         self._build()
         self.refresh()
-        self.update_idletasks()
-        width = max(WIDE, self.winfo_reqwidth())
-        height = self.winfo_reqheight()
-        self.geometry("%dx%d" % (width, height))
-        self.minsize(760, min(height, 560))
-        self.bind("<MouseWheel>", self._wheel)
+        # mod_manager: a frame doesn't see its children's wheel events, so listen on the window instead.
+        self._wheel_bind = self.winfo_toplevel().bind("<MouseWheel>", self._wheel, add="+")
         self.bind("<Destroy>", self._on_destroy)
         try:
             self._trace = root.v_ip.trace_add("write", self._ip_changed)
             self._trace_port = root.v_port.trace_add("write", self._ip_changed)
         except Exception:
             self._trace = None
-        _chrome._finish_dark_window(self)
 
     def _label(self, parent, text, **kw):
         t = _theme
@@ -552,6 +549,11 @@ class ModpacksWindow(tk.Toplevel):
         self.status.configure(text=text, fg=_theme.RED if error else _theme.CYAN)
 
     def _wheel(self, event):
+        try:  # mod_manager: another tab is showing, or the panel is gone
+            if not self.winfo_ismapped():
+                return
+        except tk.TclError:
+            return
         widget = self.winfo_containing(event.x_root, event.y_root)
         for scroll in (self.pack_list, self.server_list, self.mod_list, self.launch_list, self.loose_list):
             if scroll.contains(widget):
@@ -1201,7 +1203,7 @@ class ModDialog(tk.Toplevel):
         moving = action == "move"
         self.title("Move to loose" if moving else "Delete mod")
         self.configure(bg=t.BG)
-        self.transient(owner)
+        self.transient(owner.winfo_toplevel())  # mod_manager: owner may be a panel
         title, detail = _mod_line(os.path.join(pack.path, name), name)
         if moving:
             text = ("Move %s (%s) out of %s into the Mods folder? It becomes a loose mod, so it always loads."
@@ -1291,7 +1293,7 @@ class LooseDialog(tk.Toplevel):
         self.keep = []
         self.title("Add %s to a pack" % only if only else "Make a pack from loose mods")
         self.configure(bg=t.BG)
-        self.transient(owner)
+        self.transient(owner.winfo_toplevel())  # mod_manager: owner may be a panel
         plan = engine.Plan(owner.game_dir, None)
         self.names = [only] if only else [n for n in sorted(plan.loose.values(), key=str.lower)
                                           if not engine.is_launcher_mod(n)]
@@ -1395,7 +1397,7 @@ class NoPackDialog(tk.Toplevel):
         self.configure(bg=t.BG)
         try:
             if owner.winfo_viewable():
-                self.transient(owner)
+                self.transient(owner.winfo_toplevel())  # mod_manager: owner may be a panel
         except Exception:
             pass
         tk.Label(
@@ -1449,7 +1451,7 @@ class ConflictDialog(tk.Toplevel):
         self.configure(bg=t.BG)
         try:
             if owner.winfo_viewable():
-                self.transient(owner)
+                self.transient(owner.winfo_toplevel())  # mod_manager: owner may be a panel
         except Exception:
             pass
         tk.Label(self, text="These mods clash, so the game can't start with all of them:", bg=t.BG, fg=t.PARCH,
@@ -1504,15 +1506,7 @@ class ConflictDialog(tk.Toplevel):
 
 
 def open_window(root, game_dir):
-    window = getattr(root, "_modpacks_window", None)
-    if window is not None and window.winfo_exists():
-        if engine.same_path(window.game_dir, game_dir):
-            window.refresh()
-            window.deiconify()
-            window.lift()
-            window.focus_force()
-            return window
-        window.destroy()
-    window = ModpacksWindow(root, game_dir)
-    root._modpacks_window = window
-    return window
+    # mod_manager: Modpacks lives in the Mod Manager window's Modpacks tab.
+    if OPEN_HOOK is not None:
+        return OPEN_HOOK(root, game_dir)
+    return None

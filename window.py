@@ -413,7 +413,7 @@ class SubmitDialog(tk.Toplevel):
         self.destroy()
 
 
-def open_for(launcher):
+def open_for(launcher, side="client", tab=None):
     """Opens (or brings forward) the window for a launcher that has a v_exe path variable."""
     exe = launcher.v_exe.get().strip() if hasattr(launcher, "v_exe") else ""
     if not exe or not os.path.isfile(exe):
