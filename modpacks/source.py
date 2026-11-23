@@ -128,7 +128,37 @@ class Manifest:
             item["filename"].lower(): item["filename"] for item in files}
 
 
+def _packclient():
+    # mod_manager: server packs come from Mod Manager's login-port client.
+    try:
+        from .. import packclient
+    except (ImportError, ValueError):
+        from mod_manager import packclient
+    return packclient
+
+
+def is_server_link(url):  # mod_manager
+    return isinstance(url, str) and url.lower().startswith("tavern://")
+
+
+def _server_manifest(url, timeout):
+    # mod_manager: a server pack. Its file links may be on any site and aren't checksum-checked
+    # (the server owner's choice); only file names are checked.
+    pc = _packclient()
+    addr = pc.parse_address(url)
+    if addr is None:
+        raise SourceError("That server address can't be read.")
+    reply = pc.query_pack(addr[0], timeout=min(timeout, 5))
+    try:
+        files, name, servers, listed = pc.parse_reply(reply, url, engine)
+    except pc.PackError as error:
+        raise SourceError(str(error)) from None
+    return Manifest(url, files, name, servers, [], listed)
+
+
 def read_manifest(url, fetcher=None, timeout=TIMEOUT):
+    if is_server_link(url):  # mod_manager
+        return _server_manifest(url, timeout)
     check_url(url)
     try:
         final, data = (fetch(url, MAX_MANIFEST, timeout, cache_bust=True) if fetcher is None
@@ -209,6 +239,7 @@ def changes(pack, manifest):
                      if low not in state["listed"] and low not in downloadable
                      and engine.is_pack_managed_mod(name)]
     listed = set()
+    server_urls = pack.source.get("urls") if isinstance(pack.source.get("urls"), dict) else {}  # mod_manager
     for item in manifest.files:
         low = item["filename"].lower()
         listed.add(low)
@@ -217,6 +248,15 @@ def changes(pack, manifest):
                 new.append(item)
             elif low not in state["listed"]:
                 dropped.append(item)
+            continue
+        if item.get("_server"):
+            # mod_manager: a server pack file is unchanged while its link is the same, whatever its checksum.
+            current = engine.sha256(os.path.join(pack.path, present[low]))
+            recorded = state["files"].get(low)
+            if recorded is not None and recorded != current:
+                kept.append("%s (you changed it, so it wasn't updated)" % present[low])
+            elif recorded is None or server_urls.get(low) != item["url"]:
+                updated.append(item)
             continue
         current = engine.sha256(os.path.join(pack.path, present[low]))
         if current == item["sha256"]:
@@ -384,10 +424,14 @@ def _download(item, target, game_dir, fetcher):
             raise SourceError("%s couldn't be downloaded (%s)." % (
                 item["filename"], getattr(error, "reason", None) or error))
         parsed = urlparse(final)
-        if parsed.scheme != "https" or (parsed.hostname or "").lower() != host_of(item["url"]):
+        if not item.get("_server") and (  # mod_manager: server packs may download from any site
+                parsed.scheme != "https" or (parsed.hostname or "").lower() != host_of(item["url"])):
             raise SourceError("%s moved to another site, so it was refused." % item["filename"])
         with open(target, "wb") as f:
             f.write(data)
+    if item.get("_server"):  # mod_manager: no checksum check; remember what actually arrived
+        item["sha256"] = engine.sha256(target)
+        return
     if engine.sha256(target) != item["sha256"]:
         raise SourceError("%s didn't match its SHA-256, so nothing was changed." % item["filename"])
 
@@ -458,6 +502,8 @@ def sync(game_dir, pack, manifest, fetcher=None):
                        "listed": dict(listed),
                        "seen": _trim(seen),
                        "checked": time.strftime("%Y-%m-%d %H:%M")}
+        if is_server_link(manifest.url):  # mod_manager: remember each file's link for change checks
+            pack.source["urls"] = {item["filename"].lower(): item["url"] for item in manifest.files}
         pack.save()
     except Exception as error:
         problems = []
