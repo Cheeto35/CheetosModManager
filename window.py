@@ -1,4 +1,5 @@
 """The Mod Manager window: browse, search, install, update and remove community mods."""
+import gc
 import json
 import os
 import queue
@@ -188,6 +189,9 @@ class ModManagerWindow(tk.Toplevel):
 
     def _run(self, work, done, label):
         self._set_busy(True, label)
+        # Free leftover Tk objects here on the Tk thread; if the worker's garbage collection freed them,
+        # Tcl would abort the whole launcher.
+        gc.collect()
 
         def worker():
             try:

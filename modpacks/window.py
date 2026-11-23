@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import gc
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog
@@ -41,6 +42,7 @@ def background(widget, work, done):
         except Exception as error:
             box.append((None, error))
 
+    gc.collect()  # mod_manager: free leftover Tk objects on the Tk thread, never in the worker
     threading.Thread(target=run, daemon=True).start()
 
     def poll():
