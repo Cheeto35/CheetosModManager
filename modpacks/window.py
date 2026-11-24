@@ -564,6 +564,13 @@ class ModpacksPanel(tk.Frame):
     def say(self, text, error=False):
         self.status.configure(text=text, fg=_theme.RED if error else _theme.CYAN)
 
+    def wheel_owner(self, widget):
+        """mod_manager: the list under the mouse that can scroll, so Mod Manager's page leaves the wheel to it."""
+        for scroll in (self.pack_list, self.server_list, self.mod_list, self.launch_list, self.loose_list):
+            if scroll.contains(widget) and scroll.inner.winfo_reqheight() > scroll.canvas.winfo_height():
+                return scroll
+        return None
+
     def _wheel(self, event):
         try:  # mod_manager: another tab is showing, or the panel is gone
             if not self.winfo_ismapped():

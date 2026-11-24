@@ -10,6 +10,7 @@ import webbrowser
 from tkinter import messagebox
 
 from . import installer as ins
+from .scrollpage import ScrollPage
 from .index import data_dir, load_index, search
 from .submit import INDEX_OWNER, issue_url, owner_names, parse_repo, remove_url, report_url
 
@@ -96,31 +97,27 @@ class ModManagerWindow(tk.Toplevel):
 
         self._list_area = tk.Frame(self, bg=BG)
         self._panel_area = tk.Frame(self, bg=BG)
+        # Modpacks and Server pack can be taller than the window, so their tab scrolls as one page.
+        self.panel_page = ScrollPage(self._panel_area, BG)
+        self.panel_page.pack(fill="both", expand=True)
         top = tk.Frame(self._list_area, bg=BG)
         top.pack(fill="x", pady=(8, 6))
         self.search_var = tk.StringVar()
         e = tk.Entry(top, textvariable=self.search_var, bg=SURF, fg=PARCH, insertbackground=AMBER,
                      relief="flat", font=("Segoe UI", 10), bd=6)
         e.pack(side="left", fill="x", expand=True)
-        self.search_var.trace_add("write", lambda *_: self.render())
+        self.search_var.trace_add("write", lambda *_: self.render(top=True))
         self.side_var = tk.StringVar(value="all")
         for value, label in (("all", "All"), ("client", "Client"), ("server", "Server")):
-            tk.Radiobutton(top, text=label, value=value, variable=self.side_var, command=self.render,
+            tk.Radiobutton(top, text=label, value=value, variable=self.side_var,
+                           command=lambda: self.render(top=True),
                            indicatoron=False, bg=SURF, fg=PARCH, selectcolor=BORDER, activebackground=BORDER,
                            activeforeground=AMBER, relief="flat", bd=0, padx=10, pady=4,
                            font=("Segoe UI", 9)).pack(side="left", padx=(6 if value == "all" else 2, 0))
 
-        body = tk.Frame(self._list_area, bg=BG)
-        body.pack(fill="both", expand=True)
-        self._canvas = tk.Canvas(body, bg=BG, highlightthickness=0)
-        sb = _mk_scrollbar(body, self._canvas.yview)
-        sb.pack(side="right", fill="y")
-        self._canvas.config(yscrollcommand=sb.set)
-        self._canvas.pack(side="left", fill="both", expand=True)
-        self._list = tk.Frame(self._canvas, bg=BG)
-        self._list_item = self._canvas.create_window((0, 0), window=self._list, anchor="nw")
-        self._list.bind("<Configure>", lambda e: self._canvas.configure(scrollregion=self._canvas.bbox("all")))
-        self._canvas.bind("<Configure>", lambda e: self._canvas.itemconfig(self._list_item, width=e.width))
+        self.page = ScrollPage(self._list_area, BG)
+        self.page.pack(fill="both", expand=True)
+        self._canvas, self._list = self.page.canvas, self.page.inner
         self.bind("<MouseWheel>", self._on_wheel, add="+")
         self._list_area.pack(fill="both", expand=True, padx=10)
 
@@ -133,7 +130,7 @@ class ModManagerWindow(tk.Toplevel):
             for panel in self.panels.values():
                 panel.pack_forget()
             self._list_area.pack(fill="both", expand=True, padx=10)
-            self.render()
+            self.render(top=True)
         else:
             self._list_area.pack_forget()
             self._panel_area.pack(fill="both", expand=True, padx=10, pady=(6, 0))
@@ -145,34 +142,51 @@ class ModManagerWindow(tk.Toplevel):
             panel.pack(fill="both", expand=True)
             if hasattr(panel, "refresh"):
                 panel.refresh()
+            self.panel_page.sync(top=True)
         self._mark_tabs()
 
     def _make_panel(self, name):
         if name == "modpacks":
             from . import packhooks
             if packhooks.GUARD_MESSAGE:
-                return tk.Label(self._panel_area, text=packhooks.GUARD_MESSAGE, bg=BG, fg=AMBER,
+                return tk.Label(self.panel_page.inner, text=packhooks.GUARD_MESSAGE, bg=BG, fg=AMBER,
                                 font=("Segoe UI", 10), wraplength=560, justify="left")
             from .modpacks.window import ModpacksPanel
-            panel = ModpacksPanel(self._panel_area, self.launcher, self.game_dir)
+            panel = ModpacksPanel(self.panel_page.inner, self.launcher, self.game_dir)
             self.launcher._modpacks_window = panel  # Modpacks refreshes this after launches and updates
             return panel
         return self._make_server_panel()
 
     def _make_server_panel(self):
         from .serverpack_ui import ServerPackPanel
-        return ServerPackPanel(self._panel_area, self)
+        return ServerPackPanel(self.panel_page.inner, self)
 
     def _mark_tabs(self):
         for key, b in self.tabs.items():
             b.config(fg=AMBER if key == self.view else PARCH)
 
-    def _on_wheel(self, event):
-        if self.view not in ("browse", "installed"):
-            return
+    def _pointer_widget(self, event):
+        """The widget under the mouse (on Windows, wheel events go to the focused widget instead)."""
         try:
-            if self.winfo_exists() and str(event.widget).startswith(str(self)):
-                self._canvas.yview_scroll(int(-event.delta / 120), "units")
+            return self.winfo_containing(event.x_root, event.y_root) or event.widget
+        except (tk.TclError, KeyError):
+            return event.widget
+
+    def _on_wheel(self, event):
+        try:
+            if not self.winfo_exists():
+                return
+            widget = self._pointer_widget(event)
+            if not str(widget).startswith(str(self)):
+                return
+            if self.view in ("browse", "installed"):
+                self.page.scroll(event.delta)
+                return
+            panel = self.panels.get(self.view)
+            owner = getattr(panel, "wheel_owner", None)
+            if owner and owner(widget):
+                return  # one of the tab's own lists scrolls instead
+            self.panel_page.scroll(event.delta)
         except tk.TclError:
             pass
 
@@ -243,7 +257,8 @@ class ModManagerWindow(tk.Toplevel):
         return {m.id: ins.status(self.records, m) for m in self.mods or []}
 
     # ---------- rendering ----------
-    def render(self):
+    def render(self, top=False):
+        """Redraws the list. top=True (a new search, filter or tab) starts again at the top."""
         for child in self._list.winfo_children():
             child.destroy()
         self.action_buttons = {}
@@ -263,6 +278,8 @@ class ModManagerWindow(tk.Toplevel):
             tk.Label(self._list, text=msg, bg=BG, fg=MUTED, font=("Segoe UI", 9)).pack(anchor="w", pady=12)
         for m in mods:
             self._card(m, statuses[m.id])
+        self._list.update_idletasks()
+        self.page.sync(top)
 
     def _card(self, m, state):
         card = tk.Frame(self._list, bg=SURF, highlightbackground=BORDER, highlightthickness=1)

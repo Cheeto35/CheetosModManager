@@ -6,6 +6,7 @@
 - Remove from the list (in a mod's ⋯ menu): the person who added a mod, or the owner of its GitHub repo, can take it off the community list.
 - Edit listing (in a mod's ⋯ menu): change a listed mod's name, description, side or tags. Same people as above.
 - The owner of the community list can edit or remove any listing.
+- Scrolling fixes: searching or filtering after scrolling down no longer leaves a blank page. The Modpacks and Server pack tabs scroll when they're taller than the window, so their bottom buttons are always reachable. The mouse wheel scrolls whichever list is under the pointer.
 
 ## 1.1.0
 
