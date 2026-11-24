@@ -8,7 +8,8 @@ A Tavern launcher addon for finding, installing and updating A Township Tale mod
 - **Install** a mod with one click. Mod Manager downloads the mod's latest GitHub release and puts its files in the right place.
 - **Update** mods when their authors publish a new release, one at a time or with **Update all**.
 - **Uninstall** removes exactly the files Mod Manager installed. Mods you installed by hand are never touched, and if a mod would replace one of your files, Mod Manager asks first.
-- **Submit a mod**: share your own mod by pasting its GitHub link. Your browser opens a pre-filled form, and the mod appears in the list a few minutes after its checks pass.
+- **Submit a mod**: share your own mod by pasting its GitHub link. Your browser opens a pre-filled form, and the mod appears in the list a few minutes after its checks pass. Submit it again to update its name, description, side or tags.
+- **Remove from the list** (in a mod's ⋯ menu): the person who added a mod, or the owner of its GitHub repo, can take it off the list. The list's bot checks the GitHub account that sends the request.
 
 > Listed mods are submitted by the community and aren't reviewed. Mods run code on your PC, so only install mods you trust.
 

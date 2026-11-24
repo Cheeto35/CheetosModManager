@@ -36,6 +36,20 @@ def issue_url(repo, name, description, side, tags):
                        "side": side, "tags": tags})
 
 
+def remove_url(repo, name):
+    return _new_issue({"template": "remove-mod.yml", "labels": "removal", "title": "Remove mod: " + name,
+                       "mod": "https://github.com/" + repo})
+
+
+def owner_names(repo, submitted_by):
+    """Who may remove a listing, for showing: the person who added it, then the repo's owner."""
+    out = []
+    for n in (submitted_by, repo.split("/")[0]):
+        if n and n.lower() not in {o.lower() for o in out}:
+            out.append(n)
+    return " or ".join(out)
+
+
 def report_url(mod_id):
     return _new_issue({"template": "report-mod.yml", "labels": "report", "title": "Report: " + mod_id,
                        "mod": mod_id})

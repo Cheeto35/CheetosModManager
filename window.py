@@ -4,13 +4,14 @@ import json
 import os
 import queue
 import threading
+import time
 import tkinter as tk
 import webbrowser
 from tkinter import messagebox
 
 from . import installer as ins
 from .index import data_dir, load_index, search
-from .submit import issue_url, parse_repo, report_url
+from .submit import issue_url, owner_names, parse_repo, remove_url, report_url
 
 try:
     from tavern_shared.theme import AMBER, BG, BORDER, MUTED, PARCH, SURF, _btn, _mk_scrollbar
@@ -84,7 +85,7 @@ class ModManagerWindow(tk.Toplevel):
         self.update_all_btn = _btn(bar, "Update all (0)", self.update_all, "success", font=("Segoe UI", 9),
                                    padx=10, pady=4)
         self.update_all_btn.pack(side="right", padx=4)
-        _btn(bar, "⟳", self.refresh, font=("Segoe UI", 9), padx=8, pady=4).pack(side="right")
+        _btn(bar, "⟳ Refresh", self.refresh, font=("Segoe UI", 9), padx=8, pady=4).pack(side="right")
         tk.Frame(self, bg=BORDER, height=1).pack(fill="x", padx=10)
 
         self.status_var = tk.StringVar(value="Loading the mod list…")
@@ -220,6 +221,7 @@ class ModManagerWindow(tk.Toplevel):
         def done(result, err):
             mods, note = result if result else ([], "Couldn't load the mod list.")
             self.mods = mods
+            self.loaded_at = time.monotonic()
             self.records = ins.load_records(self.game_dir)
             self.render()
             panel = self.panels.get("server_pack")
@@ -291,9 +293,14 @@ class ModManagerWindow(tk.Toplevel):
         self.action_buttons[m.id] = btn
 
     def _menu(self, widget, m):
+        menu = self._build_menu(widget, m)
+        menu.tk_popup(widget.winfo_rootx(), widget.winfo_rooty() + widget.winfo_height())
+
+    def _build_menu(self, widget, m):
         menu = tk.Menu(self, tearoff=False, bg=SURF, fg=PARCH, activebackground=BORDER, activeforeground=AMBER)
         menu.add_command(label="Open GitHub page", command=lambda: webbrowser.open("https://github.com/" + m.repo))
         menu.add_command(label="Report this mod", command=lambda: webbrowser.open(report_url(m.id)))
+        menu.add_command(label="Remove from the list…", command=lambda: self.remove_from_list(m))
         if self.side == "client" and m.latest_tag:
             sub = tk.Menu(menu, tearoff=False, bg=SURF, fg=PARCH, activebackground=BORDER, activeforeground=AMBER)
             for name in self.pack_names():
@@ -306,7 +313,17 @@ class ModManagerWindow(tk.Toplevel):
             menu.add_separator()
             menu.add_command(label="Uninstall", command=lambda: self.uninstall(m),
                              state="disabled" if self.busy else "normal")
-        menu.tk_popup(widget.winfo_rootx(), widget.winfo_rooty() + widget.winfo_height())
+        return menu
+
+    def remove_from_list(self, m):
+        """Opens the removal form. The list's bot only accepts it from whoever added the mod or owns its repo."""
+        who = owner_names(m.repo, m.submitted_by)
+        if messagebox.askokcancel(
+                "Remove from the list",
+                f"Only {who} can remove {m.name} from the community list.\n\n"
+                f"GitHub opens a removal form. If you're signed in as {who}, {m.name} is removed within a few "
+                "minutes. This doesn't uninstall it from your game.", parent=self):
+            webbrowser.open(remove_url(m.repo, m.name))
 
     def _set_busy(self, busy, msg=None):
         self.busy = busy
@@ -515,6 +532,9 @@ class SubmitDialog(tk.Toplevel):
         self.destroy()
 
 
+STALE_SECONDS = 300  # reopening the window fetches the list again after this long
+
+
 def open_for(launcher, side="client", tab=None):
     """Opens (or brings forward) the window for a launcher that has a v_exe path variable."""
     exe = launcher.v_exe.get().strip() if hasattr(launcher, "v_exe") else ""
@@ -531,6 +551,8 @@ def open_for(launcher, side="client", tab=None):
     else:
         win.deiconify()
         win.lift()
+        if not win.busy and time.monotonic() - getattr(win, "loaded_at", 0) > STALE_SECONDS:
+            win.refresh()  # the window stays open between uses; don't keep showing an old list
     if tab:
         win.show_tab(tab)
     return win

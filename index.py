@@ -23,6 +23,7 @@ class Mod:
     latest_tag: str | None = None
     assets: list = field(default_factory=list)
     unavailable: bool = False
+    submitted_by: str = ""
 
 
 def data_dir():
@@ -48,7 +49,8 @@ def _parse_one(e):
     tags = [str(t) for t in e.get("tags") or [] if isinstance(t, (str, int))]
     return Mod(id=id_, name=name, repo=repo, author=str(e.get("author") or repo.split("/")[0]),
                description=str(e.get("description") or ""), side=side, tags=tags,
-               latest_tag=latest.get("tag") or None, assets=assets, unavailable=bool(e.get("unavailable")))
+               latest_tag=latest.get("tag") or None, assets=assets, unavailable=bool(e.get("unavailable")),
+               submitted_by=str(e.get("submitted_by") or ""))
 
 
 def parse_index(data):
