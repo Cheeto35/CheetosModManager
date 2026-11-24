@@ -44,6 +44,12 @@ Your mod needs a public GitHub repo with a release that has your `.dll` attached
 
 The list lives at [Cheeto35/ATTModIndex](https://github.com/Cheeto35/ATTModIndex). New releases are picked up within an hour.
 
+## Downloads
+
+Every download uses HTTPS certificates checked against a bundled copy of Mozilla's trusted list (`modpacks/cacert.pem`, from [certifi](https://pypi.org/project/certifi/) 2026.11.20, MPL-2.0, see `modpacks/CERTIFI-LICENSE`), so a PC with an out-of-date certificate store still connects. If that check fails, your PC's own list gets one try. If both fail, Mod Manager says so and asks you to check your PC's date and time.
+
+Files stream straight to disk, up to 512 MB each and 512 MB per update. Packs download up to four mods at a time. Files from a pack link must stay on that link's site through every redirect.
+
 ## Files it keeps
 
 - `<game folder>/.mod_manager.json`: which mods are installed and which files belong to each.
@@ -51,6 +57,6 @@ The list lives at [Cheeto35/ATTModIndex](https://github.com/Cheeto35/ATTModIndex
 
 ## Credits
 
-Modpacks is by **Shadow** ([calebv2/-Client-Addon-Modpacks](https://github.com/calebv2/-Client-Addon-Modpacks)) and is included under the MIT licence (see `modpacks/LICENSE`). Mod Manager adds server packs, Add to pack, and the combined window.
+Modpacks is by **Shadow** ([calebv2/-Client-Addon-Modpacks](https://github.com/calebv2/-Client-Addon-Modpacks)) and is included under the MIT licence (see `modpacks/LICENSE`). The download code (`modpacks/tls.py`) is adapted from Shadow's **Sheikah Mods** ([calebv2/Sheikah-Mods](https://github.com/calebv2/Sheikah-Mods)), also MIT. Mod Manager adds server packs, Add to pack, and the combined window.
 
 Made By Cheeto.

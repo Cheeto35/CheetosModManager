@@ -33,8 +33,17 @@ def _launcher_servers():
     return servers
 
 
-def background(widget, work, done):
+class Progress:  # mod_manager: a worker sets .text; background() shows it on the Tk thread
+    def __init__(self):
+        self.text = None
+
+    def __call__(self, text):
+        self.text = text
+
+
+def background(widget, work, done, progress=None, show=None):
     box = []
+    shown = [None]
 
     def run():
         try:
@@ -50,6 +59,9 @@ def background(widget, work, done):
             if box:
                 done(*box[0])
             else:
+                if progress is not None and show and progress.text and progress.text != shown[0]:  # mod_manager
+                    shown[0] = progress.text
+                    show(progress.text)
                 widget.after(150, poll)
         except tk.TclError:
             pass
@@ -958,7 +970,8 @@ class ModpacksPanel(tk.Frame):
             n = len(pack.files())
             self.say("Joined %s: %d mod%s. It loads when you join %s:%d." % (
                 pack.name, n, "" if n == 1 else "s", host, port))
-        background(self, lambda: source.join_server(self.game_dir, host, port), done)
+        seen = Progress()
+        background(self, lambda: source.join_server(self.game_dir, host, port, progress=seen), done, seen, self.say)
         return True
 
     def from_link(self):
@@ -986,8 +999,9 @@ class ModpacksPanel(tk.Frame):
         if not name:
             return
         self.say("Downloading %d mods from %s..." % (len(manifest.files), manifest.host))
-        background(self, lambda: source.subscribe(self.game_dir, url, name, _launcher_servers(), manifest=manifest),
-                   self._linked)
+        seen = Progress()
+        background(self, lambda: source.subscribe(self.game_dir, url, name, _launcher_servers(), manifest=manifest,
+                                                  progress=seen), self._linked, seen, self.say)
 
     def _linked(self, result, error):
         if error:
@@ -1046,8 +1060,9 @@ class ModpacksPanel(tk.Frame):
             self.say("")
             return
         self.say("Updating %s..." % name)
-        background(self.root, lambda: source.sync(self.game_dir, pack, manifest),
-                   lambda done, error: self._synced(name, done, error))
+        seen = Progress()
+        background(self.root, lambda: source.sync(self.game_dir, pack, manifest, progress=seen),
+                   lambda done, error: self._synced(name, done, error), seen, self.say)
         return True
 
     def _synced(self, name, found, error):

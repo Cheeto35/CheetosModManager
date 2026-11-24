@@ -6,6 +6,7 @@
 - Add to pack: put any mod from the list straight into a pack.
 - Server pack (server launcher): pick the mods players need, then share your server's address.
 - Join a server's pack: enter a server's address, and Mod Manager downloads its mods and loads them only on that server. The first time you join a server that shares a pack, Mod Manager offers to set it up, and it updates on later joins.
+- Safer downloads, from Sheikah Mods by Shadow: HTTPS uses a bundled, up-to-date certificate list, so PCs with an old certificate store still connect. Large mods (up to 512 MB) stream straight to disk. Packs download four mods at a time and show "Downloading 3 of 8". Link packs check every redirect.
 - Fixed a rare launcher crash when a download started right after closing a window.
 
 ## 1.0.0 - first release

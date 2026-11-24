@@ -4,7 +4,6 @@ import json
 import os
 import shutil
 import tempfile
-import urllib.request
 import zipfile
 
 from .index import USER_AGENT
@@ -106,18 +105,17 @@ def status(records, mod):
 
 
 def default_download(url, dest, on_progress=None):
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=30) as r, open(dest, "wb") as f:
-        total = int(r.headers.get("Content-Length") or 0)
-        done = 0
-        while True:
-            chunk = r.read(65536)
-            if not chunk:
-                break
-            f.write(chunk)
-            done += len(chunk)
-            if on_progress:
-                on_progress(done, total)
+    """Streams a release file to dest over the bundled certificates; partial files are removed."""
+    from .modpacks import tls
+    total = [0]
+    done = [0]
+
+    def chunk(n):
+        done[0] += n
+        if on_progress:
+            on_progress(done[0], total[0])
+    tls.download(url, dest, tls.MAX_FILE, {"User-Agent": USER_AGENT}, 30, on_chunk=chunk,
+                 on_size=lambda n: total.__setitem__(0, n))
 
 
 def file_sha256(path):

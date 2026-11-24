@@ -6,9 +6,9 @@ import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
-from urllib.request import Request, urlopen
 
 from . import engine
+from . import tls  # mod_manager: Sheikah-style downloads
 
 USER_AGENT = "TavernLauncher-Modpacks/1.0"
 TIMEOUT = 20
@@ -21,6 +21,9 @@ DOWNLOADS_DIR = "_downloads"
 SEEN_LIMIT = 400
 CHECK_CACHE_SECONDS = 120
 FAILED_CHECK_CACHE_SECONDS = 10
+MAX_DOWNLOAD = tls.MAX_FILE  # mod_manager: per file, streamed to disk (was 64 MiB in memory)
+MAX_UPDATE = 512 * 1024 * 1024  # mod_manager: all downloads in one update together
+PARALLEL_DOWNLOADS = 4  # mod_manager
 
 
 class ManifestChecks:
@@ -99,17 +102,11 @@ def fetch(url, limit, timeout=TIMEOUT, cache_bust=False):
         query = parse_qsl(parsed.query, keep_blank_values=True)
         query.append(("_modpacks_check", str(time.time_ns())))
         request_url = urlunparse(parsed._replace(query=urlencode(query)))
-    request = Request(request_url, headers={
-        "User-Agent": USER_AGENT,
-        "Cache-Control": "no-cache, no-store, max-age=0",
-        "Pragma": "no-cache",
-    })
-    with urlopen(request, timeout=timeout) as response:
-        final = response.geturl()
-        data = response.read(limit + 1)
-    if len(data) > limit:
-        raise SourceError("%s is too big." % os.path.basename(urlparse(url).path) or url)
-    return final, data
+    headers = {"User-Agent": USER_AGENT, "Cache-Control": "no-cache, no-store, max-age=0", "Pragma": "no-cache"}
+    try:  # mod_manager: bundled certificates (tls)
+        return tls.fetch(request_url, limit, headers, timeout)
+    except tls.DownloadError as error:
+        raise SourceError(str(error)) from error
 
 
 def host_of(url):
@@ -411,24 +408,42 @@ def _local_copy(game_dir, name, digest):
     return None
 
 
-def _download(item, target, game_dir, fetcher):
+def _same_site(item):
+    """mod_manager: every redirect must stay on https at the file's own site (server packs skip this)."""
+    host = host_of(item["url"])
+
+    def check(url):
+        parsed = urlparse(url)
+        if parsed.scheme != "https" or (parsed.hostname or "").lower() != host:
+            raise tls.DownloadError("%s moved to another site, so it was refused." % item["filename"])
+    return check
+
+
+def _download(item, target, game_dir, fetcher, reserve=None):
     local = _local_copy(game_dir, item["filename"], item["sha256"])
     if local:
         shutil.copyfile(local, target)
     else:
+        check = None if item.get("_server") else _same_site(item)  # mod_manager: server packs: any site
         try:
-            final, data = (fetcher or fetch)(item["url"], engine.MAX_ENTRY)
+            if fetcher:
+                final, data = fetcher(item["url"], MAX_DOWNLOAD)
+                if reserve:
+                    reserve(len(data))
+                if check:
+                    check(final)
+                with open(target, "wb") as f:
+                    f.write(data)
+            else:  # mod_manager: stream to disk, checking every redirect
+                tls.download(item["url"], target, MAX_DOWNLOAD, {"User-Agent": USER_AGENT}, TIMEOUT,
+                             check=check, on_chunk=reserve)
         except SourceError:
             raise
+        except tls.DownloadError as error:
+            raise SourceError(str(error)) from error
         except Exception as error:
             raise SourceError("%s couldn't be downloaded (%s)." % (
                 item["filename"], getattr(error, "reason", None) or error))
-        parsed = urlparse(final)
-        if not item.get("_server") and (  # mod_manager: server packs may download from any site
-                parsed.scheme != "https" or (parsed.hostname or "").lower() != host_of(item["url"])):
-            raise SourceError("%s moved to another site, so it was refused." % item["filename"])
-        with open(target, "wb") as f:
-            f.write(data)
     if item.get("_server"):  # mod_manager: no checksum check; remember what actually arrived
         item["sha256"] = engine.sha256(target)
         return
@@ -436,7 +451,48 @@ def _download(item, target, game_dir, fetcher):
         raise SourceError("%s didn't match its SHA-256, so nothing was changed." % item["filename"])
 
 
-def sync(game_dir, pack, manifest, fetcher=None):
+def _download_all(items, work, game_dir, fetcher, progress):
+    """mod_manager: up to PARALLEL_DOWNLOADS at once, MAX_UPDATE in total; the first failure stops the rest."""
+    if not items:
+        return
+    lock = threading.Lock()
+    failed = threading.Event()
+    state = {"bytes": 0, "done": 0, "error": None}
+
+    def reserve(size):
+        if failed.is_set():
+            raise SourceError("Stopped because another download failed.")
+        with lock:
+            if state["bytes"] + size > MAX_UPDATE:
+                raise SourceError("The update is bigger than the %d MiB download limit, so nothing was changed."
+                                  % (MAX_UPDATE // (1024 * 1024)))
+            state["bytes"] += size
+
+    def one(item):
+        if failed.is_set():
+            return
+        try:
+            _download(item, os.path.join(work, item["filename"]), game_dir, fetcher, reserve)
+        except Exception as error:
+            with lock:
+                if state["error"] is None:
+                    state["error"] = error
+            failed.set()
+            return
+        with lock:
+            state["done"] += 1
+            if progress:
+                progress("Downloading %d of %d" % (state["done"], len(items)))
+
+    if progress:
+        progress("Downloading 0 of %d" % len(items))
+    with ThreadPoolExecutor(max_workers=min(PARALLEL_DOWNLOADS, len(items))) as pool:
+        list(pool.map(one, items))
+    if state["error"] is not None:
+        raise state["error"]
+
+
+def sync(game_dir, pack, manifest, fetcher=None, progress=None):
     found = changes(pack, manifest)
     original_metadata = engine.Pack(pack.path).state()
     original_files = {name: engine.sha256(os.path.join(pack.path, name)) for name in pack.files()}
@@ -446,8 +502,7 @@ def sync(game_dir, pack, manifest, fetcher=None):
     original_source, original_on = pack.source, set(pack.on)
     keep_work = False
     try:
-        for item in found["new"] + found["updated"]:
-            _download(item, os.path.join(work, item["filename"]), game_dir, fetcher)
+        _download_all(found["new"] + found["updated"], work, game_dir, fetcher, progress)  # mod_manager
         # Downloads can take a while; never replace edits made during that wait.
         current = engine.Pack(pack.path)
         current_files = {name: engine.sha256(os.path.join(pack.path, name)) for name in current.files()}
@@ -558,7 +613,7 @@ def suggest_link(manifest, known_servers):
     return links
 
 
-def subscribe(game_dir, url, name, known_servers, fetcher=None, manifest=None):
+def subscribe(game_dir, url, name, known_servers, fetcher=None, manifest=None, progress=None):
     manifest = manifest or read_manifest(url, fetcher)
     pack = engine.create_pack(game_dir, name, "off")
     try:
@@ -569,7 +624,7 @@ def subscribe(game_dir, url, name, known_servers, fetcher=None, manifest=None):
                             for s in links]
         pack.source = {"url": manifest.url, "files": {}, "seen": [], "checked": ""}
         pack.save()
-        found = sync(game_dir, pack, manifest, fetcher)
+        found = sync(game_dir, pack, manifest, fetcher, progress)
     except Exception:
         shutil.rmtree(pack.path, ignore_errors=True)
         raise
@@ -626,7 +681,7 @@ def unlink(pack):
     pack.save()
 
 
-def join_server(game_dir, host, port, fetcher=None):
+def join_server(game_dir, host, port, fetcher=None, progress=None):
     """mod_manager: set up (or update) the pack a server shares, scoped to that server. Returns (pack, found)."""
     pc = _packclient()
     url = pc.link(host, port)
@@ -634,7 +689,7 @@ def join_server(game_dir, host, port, fetcher=None):
     server = {"name": manifest.name or host, "host": host, "port": str(engine.parse_port(port))}
     pack = next((p for p in engine.list_packs(game_dir) if source_state(p)["url"] == url), None)
     if pack is not None:
-        found = sync(game_dir, pack, manifest, fetcher)
+        found = sync(game_dir, pack, manifest, fetcher, progress)
         pack = engine.find_pack(game_dir, pack.name)
     else:
         safe_host = host.replace(":", "-")

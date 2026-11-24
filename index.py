@@ -1,11 +1,10 @@
 """The community mod list: download it, keep a saved copy, and search it."""
 import json
 import os
-import urllib.request
 from dataclasses import dataclass, field
 
 INDEX_URL = "https://raw.githubusercontent.com/Cheeto35/ATTModIndex/main/mods.json"
-USER_AGENT = "CheetosModManager/1.0"
+USER_AGENT = "CheetosModManager/1.1"
 SIDES = ("client", "server", "both")
 
 NOTE_STALE = "Couldn't refresh the mod list; showing the saved copy."
@@ -75,9 +74,9 @@ def _default_fetch():
     if not src.lower().startswith(("http://", "https://")):
         with open(src, "r", encoding="utf-8") as f:
             return f.read()
-    req = urllib.request.Request(src, headers={"User-Agent": USER_AGENT, "Cache-Control": "no-cache"})
-    with urllib.request.urlopen(req, timeout=15) as r:
-        return r.read().decode("utf-8")
+    from .modpacks import tls
+    _, data = tls.fetch(src, 8 * 1024 * 1024, {"User-Agent": USER_AGENT, "Cache-Control": "no-cache"}, 15)
+    return data.decode("utf-8")
 
 
 def default_cache_path():
