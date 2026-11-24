@@ -11,7 +11,7 @@ from tkinter import messagebox
 
 from . import installer as ins
 from .index import data_dir, load_index, search
-from .submit import issue_url, owner_names, parse_repo, remove_url, report_url
+from .submit import INDEX_OWNER, issue_url, owner_names, parse_repo, remove_url, report_url
 
 try:
     from tavern_shared.theme import AMBER, BG, BORDER, MUTED, PARCH, SURF, _btn, _mk_scrollbar
@@ -34,6 +34,8 @@ WARNING = ("Mods run code on your PC. This list is submitted by the community an
 NO_MELON = "Install MelonLoader first from the launcher's Mods window."
 SUBMITTED = ("Your browser will open GitHub. Submit the issue there; the mod shows up here within a few "
              "minutes once its checks pass.")
+EDITED = ("Your browser will open GitHub. Submit the issue there; the new details show up here within a few "
+          "minutes. Only the person who added the mod, or the owner of its repo, can change it.")
 BUTTON_TEXT = {"not_installed": "Install", "installed": "Installed ✓", "update": "Update",
                "unavailable": "Unavailable"}
 BUTTON_STYLE = {"not_installed": "primary", "installed": "dim", "update": "success", "unavailable": "dim"}
@@ -300,6 +302,7 @@ class ModManagerWindow(tk.Toplevel):
         menu = tk.Menu(self, tearoff=False, bg=SURF, fg=PARCH, activebackground=BORDER, activeforeground=AMBER)
         menu.add_command(label="Open GitHub page", command=lambda: webbrowser.open("https://github.com/" + m.repo))
         menu.add_command(label="Report this mod", command=lambda: webbrowser.open(report_url(m.id)))
+        menu.add_command(label="Edit listing…", command=lambda: self.edit_listing(m))
         menu.add_command(label="Remove from the list…", command=lambda: self.remove_from_list(m))
         if self.side == "client" and m.latest_tag:
             sub = tk.Menu(menu, tearoff=False, bg=SURF, fg=PARCH, activebackground=BORDER, activeforeground=AMBER)
@@ -318,11 +321,15 @@ class ModManagerWindow(tk.Toplevel):
     def remove_from_list(self, m):
         """Opens the removal form. The list's bot only accepts it from whoever added the mod or owns its repo."""
         who = owner_names(m.repo, m.submitted_by)
-        if messagebox.askokcancel(
-                "Remove from the list",
-                f"Only {who} can remove {m.name} from the community list.\n\n"
-                f"GitHub opens a removal form. If you're signed in as {who}, {m.name} is removed within a few "
-                "minutes. This doesn't uninstall it from your game.", parent=self):
+        if self.is_list_owner:
+            text = (f"You manage the community list, so you can remove {m.name}.\n\n"
+                    f"GitHub opens a removal form. Submit it while signed in as {INDEX_OWNER}, and {m.name} is "
+                    "removed within a few minutes. This doesn't uninstall it from your game.")
+        else:
+            text = (f"Only {who} can remove {m.name} from the community list.\n\n"
+                    f"GitHub opens a removal form. If you're signed in as {who}, {m.name} is removed within a few "
+                    "minutes. This doesn't uninstall it from your game.")
+        if messagebox.askokcancel("Remove from the list", text, parent=self):
             webbrowser.open(remove_url(m.repo, m.name))
 
     def _set_busy(self, busy, msg=None):
@@ -370,20 +377,32 @@ class ModManagerWindow(tk.Toplevel):
                 panel.refresh()
         self._run(work, done, f"Adding {m.name} to {pack_name}…")
 
-    def _warned(self):
+    def _settings(self):
         try:
             with open(self._settings_path, "r", encoding="utf-8") as f:
-                return bool(json.load(f).get("warned"))
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
         except Exception:
-            return False
+            return {}
+
+    def _warned(self):
+        return bool(self._settings().get("warned"))
 
     def _set_warned(self):
+        data = self._settings()
+        data["warned"] = True
         try:
             os.makedirs(os.path.dirname(self._settings_path) or ".", exist_ok=True)
             with open(self._settings_path, "w", encoding="utf-8") as f:
-                json.dump({"warned": True}, f)
+                json.dump(data, f)
         except OSError:
             pass
+
+    @property
+    def is_list_owner(self):
+        """True on the PC of the community list's owner ("github_user" in mod_manager_settings.json).
+        Edit listing and Remove then work for every mod, because the list's bot accepts them from that account."""
+        return str(self._settings().get("github_user") or "").lower() == INDEX_OWNER.lower()
 
     def _can_install(self):
         if self.busy:
@@ -478,19 +497,28 @@ class ModManagerWindow(tk.Toplevel):
 
     # ---------- submit ----------
     def open_submit(self):
-        SubmitDialog(self)
+        return SubmitDialog(self)
+
+    def edit_listing(self, m):
+        """The submit form, filled in with the listing's details; the bot only takes it from an owner."""
+        return SubmitDialog(self, mod=m)
 
 
 class SubmitDialog(tk.Toplevel):
-    def __init__(self, parent):
+    def __init__(self, parent, mod=None):
         super().__init__(parent)
         _start_hidden(self)
-        self.title("Submit a mod")
+        self.mod = mod
+        self.heading = "Edit listing" if mod else "Submit a mod"
+        self.title(self.heading)
         self.configure(bg=BG)
         self.resizable(False, False)
         _set_window_icon(self)
         self.transient(parent)
-        tk.Label(self, text="Share a mod that has a GitHub release with a .dll (or a .zip with one) attached.",
+        intro = ("Change how this mod shows up in the list. Only the person who added it, or the owner of its "
+                 "repo, can do this." if mod else
+                 "Share a mod that has a GitHub release with a .dll (or a .zip with one) attached.")
+        tk.Label(self, text=intro,
                  bg=BG, fg=MUTED, font=("Segoe UI", 9), wraplength=420, justify="left"
                  ).pack(anchor="w", padx=16, pady=(14, 6))
         self.vars = {}
@@ -503,7 +531,11 @@ class SubmitDialog(tk.Toplevel):
                      font=("Segoe UI", 10), bd=6, width=52).pack(fill="x", padx=16)
         tk.Label(self, text="Who installs it?", bg=BG, fg=PARCH, font=("Segoe UI", 9, "bold")
                  ).pack(anchor="w", padx=16, pady=(6, 2))
-        self.side = tk.StringVar(value="both")
+        self.side = tk.StringVar(value=mod.side if mod else "both")
+        if mod:
+            for key, value in (("repo", "https://github.com/" + mod.repo), ("name", mod.name),
+                               ("description", mod.description), ("tags", ", ".join(mod.tags))):
+                self.vars[key].set(value)
         sides = tk.Frame(self, bg=BG)
         sides.pack(anchor="w", padx=16)
         for value, label in (("client", "Players (client)"), ("server", "Server owners"), ("both", "Both")):
@@ -511,7 +543,7 @@ class SubmitDialog(tk.Toplevel):
                            activebackground=BG, activeforeground=AMBER, font=("Segoe UI", 9)).pack(side="left")
         btns = tk.Frame(self, bg=BG)
         btns.pack(fill="x", padx=16, pady=14)
-        _btn(btns, "Open GitHub to submit", self._submit, "primary", font=("Segoe UI", 9, "bold"), padx=12,
+        _btn(btns, "Open GitHub to save" if mod else "Open GitHub to submit", self._submit, "primary", font=("Segoe UI", 9, "bold"), padx=12,
              pady=6).pack(side="left")
         _btn(btns, "Cancel", self.destroy, font=("Segoe UI", 9), padx=10, pady=6).pack(side="left", padx=6)
         _finish_dark_window(self)
@@ -520,15 +552,15 @@ class SubmitDialog(tk.Toplevel):
         repo = parse_repo(self.vars["repo"].get())
         name = self.vars["name"].get().strip()
         if not repo:
-            messagebox.showinfo("Submit a mod", "Paste the mod's GitHub link, like https://github.com/You/YourMod.",
+            messagebox.showinfo(self.heading, "Paste the mod's GitHub link, like https://github.com/You/YourMod.",
                                 parent=self)
             return
         if not name:
-            messagebox.showinfo("Submit a mod", "Give the mod a name.", parent=self)
+            messagebox.showinfo(self.heading, "Give the mod a name.", parent=self)
             return
         webbrowser.open(issue_url(repo, name, self.vars["description"].get().strip(), self.side.get(),
-                                  self.vars["tags"].get().strip()))
-        messagebox.showinfo("Submit a mod", SUBMITTED, parent=self)
+                                  self.vars["tags"].get().strip(), edit=self.mod is not None))
+        messagebox.showinfo(self.heading, EDITED if self.mod else SUBMITTED, parent=self)
         self.destroy()
 
 

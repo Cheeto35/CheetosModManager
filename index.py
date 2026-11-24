@@ -1,9 +1,15 @@
 """The community mod list: download it, keep a saved copy, and search it."""
 import json
 import os
+import re
 from dataclasses import dataclass, field
 
-INDEX_URL = "https://raw.githubusercontent.com/Cheeto35/ATTModIndex/main/mods.json"
+INDEX_REPO = "Cheeto35/ATTModIndex"
+INDEX_URL = f"https://raw.githubusercontent.com/{INDEX_REPO}/main/mods.json"
+# raw.githubusercontent keeps each file for up to 5 minutes per server, so "main" can be stale for a while.
+# Reading the file at the newest commit never is; that lookup costs 1 of GitHub's 60 API calls/hour per IP.
+COMMIT_URL = f"https://api.github.com/repos/{INDEX_REPO}/commits/main"
+RAW_AT = "https://raw.githubusercontent.com/" + INDEX_REPO + "/{sha}/mods.json"
 USER_AGENT = "CheetosModManager/1.1"
 SIDES = ("client", "server", "both")
 
@@ -77,8 +83,25 @@ def _default_fetch():
         with open(src, "r", encoding="utf-8") as f:
             return f.read()
     from .modpacks import tls
-    _, data = tls.fetch(src, 8 * 1024 * 1024, {"User-Agent": USER_AGENT, "Cache-Control": "no-cache"}, 15)
+    headers = {"User-Agent": USER_AGENT, "Cache-Control": "no-cache"}
+    if src == INDEX_URL:
+        sha = _newest_commit(tls)
+        if sha:
+            try:
+                return tls.fetch(RAW_AT.format(sha=sha), 8 * 1024 * 1024, headers, 15)[1].decode("utf-8")
+            except Exception:
+                pass
+    _, data = tls.fetch(src, 8 * 1024 * 1024, headers, 15)
     return data.decode("utf-8")
+
+
+def _newest_commit(tls):
+    try:
+        _, data = tls.fetch(COMMIT_URL, 4096, {"User-Agent": USER_AGENT, "Accept": "application/vnd.github.sha"}, 10)
+    except Exception:
+        return None
+    sha = data.decode("ascii", "replace").strip()
+    return sha if re.fullmatch(r"[0-9a-f]{40}", sha) else None
 
 
 def default_cache_path():

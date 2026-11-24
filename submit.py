@@ -3,6 +3,7 @@ import re
 from urllib.parse import urlencode
 
 INDEX_REPO = "Cheeto35/ATTModIndex"
+INDEX_OWNER = INDEX_REPO.split("/")[0]
 _NAME = r"[A-Za-z0-9_.-]+"
 _REPO_RE = re.compile(r"^(?:(?:https?://)?(?:www\.)?github\.com/)?(" + _NAME + r")/(" + _NAME + r")(?:/.*)?$")
 
@@ -30,8 +31,10 @@ def _new_issue(params):
     return f"https://github.com/{INDEX_REPO}/issues/new?" + urlencode(params)
 
 
-def issue_url(repo, name, description, side, tags):
-    return _new_issue({"template": "submit-mod.yml", "labels": "submission", "title": "Add mod: " + name,
+def issue_url(repo, name, description, side, tags, edit=False):
+    """The submit form. edit=True is the same form for changing a listed mod's details."""
+    return _new_issue({"template": "submit-mod.yml", "labels": "submission",
+                       "title": ("Edit mod: " if edit else "Add mod: ") + name,
                        "repo": "https://github.com/" + repo, "name": name, "description": description,
                        "side": side, "tags": tags})
 

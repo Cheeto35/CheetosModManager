@@ -2,9 +2,10 @@
 
 ## 1.1.1
 
-- Reopening Mod Manager fetches the mod list again when it's more than 5 minutes old, so newly added mods show up. The refresh button now says ⟳ Refresh.
+- ⟳ Refresh always gets the newest list. Before, GitHub could hand out a copy up to 5 minutes old, so people saw different lists right after a mod was added. Reopening Mod Manager also refreshes a list that's more than 5 minutes old.
 - Remove from the list (in a mod's ⋯ menu): the person who added a mod, or the owner of its GitHub repo, can take it off the community list.
-- To update a listing's name, description, side or tags, submit the mod again (same people as above).
+- Edit listing (in a mod's ⋯ menu): change a listed mod's name, description, side or tags. Same people as above.
+- The owner of the community list can edit or remove any listing.
 
 ## 1.1.0
 
